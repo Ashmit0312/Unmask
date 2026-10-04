@@ -35,6 +35,7 @@ cd contracts && forge test
 cd offchain && python -m venv .venv && .venv/Scripts/python -m pip install -e ".[dev]"
 .venv/Scripts/python -m pytest
 .venv/Scripts/python -m trustscore.indexer   # last 1000 testnet blocks of ERC-8004 events
+.venv/Scripts/python -m trustscore.simulate --seed 0 --out ../data/sim0   # synthetic world + ground-truth labels
 ```
 
 Secrets: copy `.env.example` to `.env`. The deployer key goes in Foundry's encrypted keystore, not `.env`:

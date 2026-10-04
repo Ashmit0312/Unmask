@@ -23,3 +23,14 @@ class Feedback:
     block: int
     tx_hash: str
     revoked: bool = False
+
+
+@dataclass(frozen=True)
+class Funding:
+    """First native-token transfer into a wallet: who bankrolled it."""
+
+    wallet: str
+    funder: str
+    amount: float  # MON
+    block: int
+    tx_hash: str
