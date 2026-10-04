@@ -36,6 +36,7 @@ cd offchain && python -m venv .venv && .venv/Scripts/python -m pip install -e ".
 .venv/Scripts/python -m pytest
 .venv/Scripts/python -m trustscore.indexer   # last 1000 testnet blocks of ERC-8004 events
 .venv/Scripts/python -m trustscore.simulate --seed 0 --out ../data/sim0   # synthetic world + ground-truth labels
+.venv/Scripts/python -m trustscore.evaluate --seeds 5   # baselines vs model across 5 attack scenarios (~10 s)
 
 # replay a small simulated world through the real registries (local fork: free, ~6 min for 235 txs)
 anvil --fork-url https://testnet-rpc.monad.xyz
