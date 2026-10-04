@@ -1,0 +1,25 @@
+# secrets
+.env
+.env.*
+!.env.example
+
+# foundry
+contracts/out/
+contracts/cache/
+contracts/broadcast/*/31337/
+contracts/broadcast/**/dry-run/
+
+# python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+.pytest_cache/
+
+# node
+node_modules/
+web/dist/
+
+# data and model artifacts (regenerable)
+data/
+*.parquet
