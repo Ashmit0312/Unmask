@@ -36,6 +36,12 @@ cd offchain && python -m venv .venv && .venv/Scripts/python -m pip install -e ".
 .venv/Scripts/python -m pytest
 .venv/Scripts/python -m trustscore.indexer   # last 1000 testnet blocks of ERC-8004 events
 .venv/Scripts/python -m trustscore.simulate --seed 0 --out ../data/sim0   # synthetic world + ground-truth labels
+
+# replay a small simulated world through the real registries (local fork: free, ~6 min for 235 txs)
+anvil --fork-url https://testnet-rpc.monad.xyz
+.venv/Scripts/python -m trustscore.replay --rpc-url http://127.0.0.1:8545 --fund anvil --out ../data/replay-local
+# same on live testnet, funded from the Foundry keystore (~8.5 MON at the 100 gwei floor)
+.venv/Scripts/python -m trustscore.replay --fund keystore:monad-deployer --out ../data/replay-testnet
 ```
 
 Secrets: copy `.env.example` to `.env`. The deployer key goes in Foundry's encrypted keystore, not `.env`:
