@@ -67,3 +67,20 @@ cd ../offchain
   --key 0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d \
   --labels ../data/replay-local --out ../data/replay-local/scores.csv
 ```
+
+## Live attack demo
+
+On top of a replayed world and a deployed oracle, `trustscore.demo` plays three acts against the real registries and
+prints ERC-8004's built-in average (`getSummary` over all raters) next to the oracle's score after each one:
+
+1. ShadyBot registers; three real users rate it ~20.
+2. 12 puppet wallets rate it 95-100. ERC-8004 average jumps to ~82; trust score does not rise, `isTrusted` stays false.
+3. The ring rates the top honest agent 0. ERC-8004 average collapses; trust score does not move.
+
+```bash
+cd offchain
+.venv/Scripts/python -m trustscore.demo --rpc-url http://127.0.0.1:8545 --fund anvil --oracle <oracle address> \
+  --key 0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d --labels ../data/replay-local
+# --via-exchange: ring funded through an exchange wallet (no funding trail)   --pause 0: no Enter prompts
+# --seed N: a fresh ShadyBot and ring   --no-score: leave scoring to a separate `trustscore.oracle --watch`
+```

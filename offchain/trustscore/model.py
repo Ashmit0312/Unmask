@@ -1,12 +1,13 @@
 """Sybil-aware trust scores: resolve wallets into likely operators, then give each operator one vote per agent.
 
-1. Hubs: funders that bankroll many wallets spread over time (exchanges, faucets) are not identity evidence.
+1. Hubs: funders that bankroll wallets in many separate bursts (exchanges, faucets) are not identity evidence.
 2. Operator clusters (union-find) over three kinds of evidence:
    - funding from a non-hub wallet (treasury -> puppets, treasury -> agent owners)
    - two raters repeatedly hitting the same agents within a short window with near-identical values
    - two raters funded by the same hub in the same burst that also co-rated an agent
 3. Ratings from the agent owner's own cluster are self-dealing and dropped.
-4. Each remaining cluster's ratings of an agent collapse to one vote, weighted by 1 - the cluster's ring suspicion.
+4. Each remaining cluster's ratings of an agent collapse to one vote, weighted by 1 - the cluster's ring suspicion
+   (the share of its ratings that are self-dealing or bloc votes).
 5. Votes are shrunk toward the global mean; agents caught self-dealing shrink toward a floor instead.
 """
 
@@ -24,12 +25,14 @@ class ModelConfig:
     # that compresses simulated time onto fewer chain blocks records its ratio in the manifest.
     block_scale: float = 1.0
     hub_min_degree: int = 8
-    hub_max_burst_share: float = 0.5  # a hub's busiest window holds less than this share of its fundings
-    burst_window: int = 5_000  # blocks; fundings this close together count as one burst
+    # A hub funds in many separate bursts (exchange withdrawals over time); a treasury funds in one or two waves.
+    # Counting bursts, not the share in the busiest one, keeps a hub a hub when an attacker routes one big burst
+    # of puppet funding through it.
+    hub_min_bursts: int = 5
+    burst_window: int = 5_000  # blocks; fundings with gaps under this belong to one burst
     corate_window: int = 2_000  # blocks; two ratings of one agent this close together are a co-rating
     corate_value_tol: float = 10.0  # co-ratings must agree this closely on the 0-100 scale
     min_shared_corates: int = 2  # distinct agents two raters must co-rate before they are linked
-    ring_share: float = 0.4  # a cluster holding this share of an agent's ratings is promoting it
     prior_strength: float = 3.0
     self_dealing_prior: float = 0.0  # where a self-dealing agent's prior moves to, 0-100
     confidence_k: float = 5.0
@@ -64,9 +67,8 @@ def detect_hubs(fund: pd.DataFrame, cfg: ModelConfig) -> set[str]:
         if len(g) < cfg.hub_min_degree:
             continue
         b = np.sort(g.block.to_numpy())
-        # Largest number of fundings inside any burst_window-wide window.
-        densest = int(np.max(np.searchsorted(b, b + cfg.burst_window, side="right") - np.arange(len(b))))
-        if densest / len(b) < cfg.hub_max_burst_share:
+        bursts = 1 + int(np.sum(np.diff(b) > cfg.burst_window))
+        if bursts >= cfg.hub_min_bursts:
             hubs.add(funder)
     return hubs
 
@@ -122,15 +124,16 @@ def score(
     owner_cluster = registrations.set_index("agent_id").owner.map(cluster)
     fb["self_dealing"] = fb.cluster.to_numpy() == fb.agent_id.map(owner_cluster).to_numpy()
 
-    # Rings: clusters with two or more rating wallets. A ring's suspicion is the share of its ratings that are
-    # self-dealing or go to an agent it dominates. Suspicion only ever discounts the ring's own votes, so pointing
-    # a ring at someone else's agent cannot drag that agent down.
+    # Rings: clusters with two or more rating wallets. A rating is coordinated when it is self-dealing or part of a
+    # bloc (two or more wallets of one cluster rating the same agent: one operator, several voices). A ring's
+    # suspicion is the share of its ratings that are coordinated. Suspicion only ever discounts the ring's own
+    # votes, so pointing a ring at someone else's agent cannot move that agent, up or down.
     raters_per_cluster = fb.groupby("cluster").client.nunique()
     fb["ring"] = fb.cluster.map(raters_per_cluster).to_numpy() >= 2
     share = fb[fb.ring].groupby(["agent_id", "cluster"]).size() / fb.groupby("agent_id").size()
-    dominated = share[share >= cfg.ring_share].index
-    fb["promoting"] = fb.self_dealing | pd.MultiIndex.from_frame(fb[["agent_id", "cluster"]]).isin(dominated)
-    cluster_susp = fb[fb.ring].groupby("cluster").promoting.mean()
+    bloc_size = fb.groupby(["agent_id", "cluster"]).client.transform("nunique")
+    fb["coordinated"] = fb.self_dealing | (bloc_size >= 2)
+    cluster_susp = fb[fb.ring].groupby("cluster").coordinated.mean()
 
     # One vote per (agent, cluster), weighted by 1 - suspicion; self-dealing ratings excluded.
     votes = fb[~fb.self_dealing].groupby(["agent_id", "cluster"]).value.mean().reset_index()

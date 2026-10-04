@@ -40,11 +40,11 @@ def test_model_beats_naive_on_sybil_agents(direct):
     assert (a.score[sybil] - true[sybil]).abs().mean() < 0.5 * (naive[sybil] - true[sybil]).abs().mean()
 
 
-def _frame_attack(regs, fb, fund, victim: int, value: float, n: int = 12):
+def _frame_attack(regs, fb, fund, victim: int, value: float, n: int = 12, ring_no: int = 0):
     """Add a fresh ring of exchange-funded wallets that all rate `victim` with `value` in one burst."""
-    hub = fund.funder.value_counts().index[0]
-    t0 = int(fb.block.max()) + 10_000
-    ring = [f"0x{i:040x}" for i in range(1, n + 1)]
+    hub = fund.funder.value_counts().index[ring_no]
+    t0 = int(max(fb.block.max(), fund.block.max())) + 10_000
+    ring = [f"0x{ring_no:08x}{i:032x}" for i in range(1, n + 1)]
     fund2 = pd.concat([fund, pd.DataFrame(
         {"wallet": ring, "funder": hub, "amount": 1.0, "block": [t0 + i for i in range(n)], "tx_hash": "0x"})])
     fb2 = pd.concat([fb, pd.DataFrame({
@@ -77,3 +77,27 @@ def test_iterative_filtering_discounts_an_outlier():
     q = baselines.iterative_filtering(fb)
     assert q[1] > 75 and q[2] < 35
     assert baselines.naive_mean(fb)[1] < 60
+
+
+def test_a_burst_routed_through_an_exchange_keeps_it_a_hub(direct):
+    w, _, _, fund = direct
+    cfg = model.ModelConfig()
+    hub = fund.funder.value_counts().index[0]
+    t0 = int(fund.block.max()) + 10_000
+    burst = pd.DataFrame({"wallet": [f"0x{i:040x}" for i in range(1, 31)], "funder": hub, "amount": 1.0,
+                          "block": [t0 + i for i in range(30)], "tx_hash": "0x"})
+    assert hub in model.detect_hubs(pd.concat([fund, burst]), cfg)
+
+
+def test_several_minority_rings_cannot_sink_an_agent(direct):
+    """Each ring is well under half the victim's ratings; together they would sink a naive average."""
+    w, regs, fb, fund = direct
+    honest = [aid for aid in regs.agent_id if not w.truth.is_sybil_agent(aid)]
+    victim = int(fb[fb.agent_id.isin(honest)].agent_id.value_counts().index[0])
+    before = model.score(regs, fb, fund).agents.set_index("agent_id").score[victim]
+    attacked = (regs, fb, fund)
+    for ring_no in range(3):
+        attacked = _frame_attack(*attacked, victim, 0.0, n=6, ring_no=ring_no)
+    after = model.score(*attacked).agents.set_index("agent_id").score[victim]
+    assert abs(after - before) < 3
+    assert baselines.naive_mean(fb)[victim] - baselines.naive_mean(attacked[1])[victim] > 15

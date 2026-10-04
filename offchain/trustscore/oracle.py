@@ -97,11 +97,17 @@ class Poster:
             rows.append({"agent_id": aid, "score_bps": s[0], "confidence_bps": s[1], "cluster_id": s[2], "epoch": s[3]})
         return pd.DataFrame(rows, columns=["agent_id", "score_bps", "confidence_bps", "cluster_id", "epoch"])
 
-    def changed(self, rows: pd.DataFrame) -> pd.DataFrame:
-        cur = self.current(rows.agent_id.tolist()).set_index("agent_id")
+    def changed(self, rows: pd.DataFrame, min_score_bps: int = 50, min_confidence_bps: int = 100) -> pd.DataFrame:
+        """Rows worth a write: never posted, ring flag changed, or score/confidence moved past the thresholds.
+        Small drifts (every new vote nudges the global prior) are skipped: Monad bills the gas limit per write."""
+        cur = self.current(rows.agent_id.tolist()).set_index("agent_id").loc[rows.agent_id]
         r = rows.set_index("agent_id")
-        cols = ["score_bps", "confidence_bps", "cluster_id"]
-        diff = (r[cols] != cur.loc[r.index, cols]).any(axis=1) | (cur.loc[r.index, "epoch"] == 0)
+        diff = (
+            (cur.epoch == 0)
+            | (r.cluster_id != cur.cluster_id)
+            | ((r.score_bps - cur.score_bps).abs() >= min_score_bps)
+            | ((r.confidence_bps - cur.confidence_bps).abs() >= min_confidence_bps)
+        )
         return rows[diff.to_numpy()]
 
     def post(self, rows: pd.DataFrame, mhash: bytes, batch: int = 100) -> list[str]:
