@@ -40,6 +40,11 @@ def score_metrics(scores: pd.Series, confidence: pd.Series, world: World) -> dic
     df["sybil"] = df.agent_id.map(t.is_sybil_agent)
     df["score"] = df.agent_id.map(scores).fillna(scores.mean())
     df["confidence"] = df.agent_id.map(confidence).fillna(0.0)
+    return frame_metrics(df)
+
+
+def frame_metrics(df: pd.DataFrame) -> dict[str, float]:
+    """Metrics from one row per agent with columns true (0-100), sybil, score (0-100), confidence (0-1)."""
     err = (df.score - df.true).abs()
     trusted = (df.score >= GATE_SCORE) & (df.confidence >= GATE_CONFIDENCE)
     good = ~df.sybil & (df.true >= GATE_SCORE)

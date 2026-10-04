@@ -47,3 +47,23 @@ anvil --fork-url https://testnet-rpc.monad.xyz
 
 Secrets: copy `.env.example` to `.env`. The deployer key goes in Foundry's encrypted keystore, not `.env`:
 `cast wallet import monad-deployer --interactive`.
+
+## End-to-end pipeline (local fork)
+
+Index from chain → score → post changed scores to `AgentTrustOracle` → read back and compare to ground truth.
+Anvil dev keys below are public and only valid locally.
+
+```bash
+# deploy the oracle (anvil account 0 deploys, account 1 is the updater)
+cd contracts
+ORACLE_UPDATER=0x70997970C51812dc3A010C7d01b50e0d17dc79C8 forge script script/DeployOracle.s.sol \
+  --rpc-url http://127.0.0.1:8545 --broadcast \
+  --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
+rm -rf broadcast/DeployOracle.s.sol/10143   # a fork shares testnet's chain id; keep real deploy records clean
+
+# score and post; --watch 5 keeps indexing new blocks and posting changes
+cd ../offchain
+.venv/Scripts/python -m trustscore.oracle --rpc-url http://127.0.0.1:8545 --oracle <oracle address> \
+  --key 0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d \
+  --labels ../data/replay-local --out ../data/replay-local/scores.csv
+```

@@ -20,6 +20,9 @@ import pandas as pd
 
 @dataclass(frozen=True)
 class ModelConfig:
+    # Observed block numbers are multiplied by this before the windows below apply. 1 for live data; a replay
+    # that compresses simulated time onto fewer chain blocks records its ratio in the manifest.
+    block_scale: float = 1.0
     hub_min_degree: int = 8
     hub_max_burst_share: float = 0.5  # a hub's busiest window holds less than this share of its fundings
     burst_window: int = 5_000  # blocks; fundings this close together count as one burst
@@ -108,6 +111,10 @@ def cluster_wallets(fb: pd.DataFrame, fund: pd.DataFrame, regs: pd.DataFrame, cf
 def score(
     registrations: pd.DataFrame, feedback: pd.DataFrame, fundings: pd.DataFrame, cfg: ModelConfig = ModelConfig()
 ) -> ScoreResult:
+    if cfg.block_scale != 1.0:
+        registrations, feedback, fundings = (
+            f.assign(block=f.block * cfg.block_scale) for f in (registrations, feedback, fundings)
+        )
     fb = feedback[~feedback.revoked] if "revoked" in feedback else feedback
     cluster = cluster_wallets(fb, fundings, registrations, cfg)
 

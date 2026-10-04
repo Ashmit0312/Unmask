@@ -15,6 +15,7 @@ import argparse
 import getpass
 import json
 import os
+import time
 from collections import defaultdict
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -43,6 +44,8 @@ DEMO = SimConfig(
 
 # Fixed gas limits. Monad bills the gas limit, not gas used, so keep these just above measured usage.
 GAS = {"transfer": 21_000, "register": 200_000, "feedback": 300_000}  # measured: 175,653 / 271,327
+# Every simulated funding moves at least this much, so wallets that never transact still show their funder onchain.
+MIN_FUNDING_WEI = 10**15
 
 
 def derive_key(secret: str, sim_wallet: str) -> bytes:
@@ -73,7 +76,7 @@ def plan_funding(world: World, gas_price: int, amount_scale: float = 0.0) -> tup
     amounts: dict[int, int] = {}
     for i in reversed(range(len(world.fundings))):
         f = world.fundings[i]
-        amounts[i] = max(int(f.amount * amount_scale * 10**18), need[f.wallet] * 6 // 5)
+        amounts[i] = max(int(f.amount * amount_scale * 10**18), need[f.wallet] * 6 // 5, MIN_FUNDING_WEI)
         need[f.funder] += amounts[i] + fee["transfer"]
 
     funded = {f.wallet for f in world.fundings}
@@ -89,8 +92,13 @@ def ordered_steps(world: World) -> list[Step]:
 
 
 class Replayer:
-    def __init__(self, w3: Web3, net: Network, world: World, secret: str):
+    def __init__(self, w3: Web3, net: Network, world: World, secret: str, time_scale: float = 100.0,
+                 can_mine: bool = False):
         self.w3, self.net, self.world = w3, net, world
+        # Simulated blocks per chain block. Gaps between simulated events are kept at this ratio, because the
+        # model's burst windows are measured in blocks; can_mine fills gaps with empty blocks (anvil) instead of waiting.
+        self.time_scale, self.can_mine = time_scale, can_mine
+        self.seed_funder: str | None = None
         self.identity = w3.eth.contract(address=net.identity_registry, abi=load_abi("IIdentityRegistry"))
         self.reputation = w3.eth.contract(address=net.reputation_registry, abi=load_abi("IReputationRegistry"))
         self.keys = {w: derive_key(secret, w) for w in world.truth.operator_of_wallet}
@@ -114,7 +122,7 @@ class Replayer:
         self._nonce[sender] += 1
         rcpt = self.w3.eth.wait_for_transaction_receipt(tx_hash, timeout=180)
         if rcpt.status != 1:
-            raise RuntimeError(f"{kind} reverted: {tx_hash.hex()}")
+            raise RuntimeError(f"{kind} reverted: {Web3.to_hex(tx_hash)}")
         self.gas_used[kind] = max(self.gas_used[kind], rcpt.gasUsed)
         return rcpt
 
@@ -131,14 +139,28 @@ class Replayer:
         name = fund.removeprefix("keystore:")
         path = Path.home() / ".foundry" / "keystores" / name
         key = Account.decrypt(json.loads(path.read_text()), getpass.getpass(f"Password for keystore {name}: "))
+        self.seed_funder = Account.from_key(key).address
         for w, wei in roots.items():
             self._send(key, {"to": self.real[w], "value": wei}, "transfer")
+
+    def _pace(self, target: int) -> None:
+        """Bring the chain to block target-1 so the next transaction lands at target (or as soon after as possible)."""
+        current = self.w3.eth.block_number
+        if target - 1 <= current:
+            return
+        if self.can_mine:
+            self.w3.provider.make_request("anvil_mine", [hex(target - 1 - current)])
+        else:
+            while self.w3.eth.block_number < target - 1:
+                time.sleep(0.2)
 
     def run(self, amounts: dict[int, int], progress_every: int = 50) -> tuple[int, int]:
         w = self.world
         start = self.w3.eth.block_number + 1
         steps = ordered_steps(w)
+        sim_start = steps[0].sim_block
         for n, st in enumerate(steps, 1):
+            self._pace(start + int((st.sim_block - sim_start) / self.time_scale))
             if st.kind == "funding":
                 f = w.fundings[st.index]
                 self._send(self.keys[f.funder], {"to": self.real[f.wallet], "value": amounts[st.index]}, "transfer")
@@ -167,6 +189,8 @@ class Replayer:
             "reputation_registry": self.net.reputation_registry,
             "from_block": start,
             "to_block": end,
+            "time_scale": self.time_scale,
+            "seed_funder": self.seed_funder,
             "sim_config": {k: v for k, v in vars(self.world.config).items()},
             "agent_map": {str(k): v for k, v in self.agent_map.items()},
             "wallet_map": self.real,
@@ -193,7 +217,12 @@ class Replayer:
         for f in fbs:
             chain[(f.agent_id, f.client)].append(f.value)
         assert sim == chain, "replayed feedback differs from simulation"
-        print(f"verified: {len(regs)} registrations and {len(fbs)} feedback read back from blocks {start}..{end}")
+
+        sim_fund = {(self.real[f.wallet], self.real[f.funder]) for f in self.world.fundings}
+        chain_fund = {(f.wallet, f.funder) for f in ix.fundings(start, end)}
+        assert sim_fund == chain_fund, f"{len(sim_fund ^ chain_fund)} fundings differ from simulation"
+        print(f"verified: {len(regs)} registrations, {len(fbs)} feedback and {len(chain_fund)} fundings "
+              f"read back from blocks {start}..{end}")
 
 
 def main() -> None:
@@ -202,6 +231,7 @@ def main() -> None:
     p.add_argument("--fund", default="anvil", help="'anvil' (set balances) or 'keystore:<foundry keystore name>'")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--amount-scale", type=float, default=0.0, help="multiply simulated MON amounts (0 = gas only)")
+    p.add_argument("--time-scale", type=float, default=100.0, help="simulated blocks per chain block")
     p.add_argument("--out", type=Path, required=True)
     p.add_argument("--yes", action="store_true", help="skip the cost confirmation")
     args = p.parse_args()
@@ -210,14 +240,14 @@ def main() -> None:
     w3 = Web3(Web3.HTTPProvider(args.rpc_url))
     world = simulate(replace(DEMO, seed=args.seed))
     secret = os.getenv("REPLAY_SECRET", "trustscore-dev")
-    rp = Replayer(w3, net, world, secret)
+    rp = Replayer(w3, net, world, secret, args.time_scale, can_mine=args.fund == "anvil")
 
     amounts, roots = plan_funding(world, rp.gas_price, args.amount_scale)
     n_tx = len(world.fundings) + len(world.registrations) + len(world.feedback)
     cost = sum(roots.values()) / 1e18
     print(f"chain {rp.chain_id}: {len(world.registrations)} agents, {len(world.feedback)} feedback, "
           f"{len(world.fundings)} fundings = {n_tx} txs; {len(roots)} root wallets need {cost:.4f} MON "
-          f"at {rp.gas_price / 1e9:.1f} gwei")
+          f"at {rp.gas_price / 1e9:.1f} gwei; spans ~{world.config.duration_blocks / args.time_scale:,.0f} chain blocks")
     if args.fund != "anvil" and not args.yes and input("proceed? [y/N] ").strip().lower() != "y":
         return
 

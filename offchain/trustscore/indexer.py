@@ -2,6 +2,8 @@
 
 Pages forward in `max_log_span` chunks because the public Monad RPC caps eth_getLogs at ~100 blocks.
 Historical backfills over millions of blocks belong to a hosted indexer, not this loop.
+Fundings (first native transfer into each wallet) come from scanning block bodies, so they are only
+practical over bounded ranges such as a demo or replay window.
 
     python -m trustscore.indexer --from-block 68145000 --to-block 68145400
 """
@@ -12,7 +14,7 @@ from collections.abc import Iterator
 from web3 import Web3
 
 from .config import MONAD_TESTNET, Network, load_abi
-from .schema import AgentRegistered, Feedback
+from .schema import AgentRegistered, Feedback, Funding
 
 
 def block_ranges(start: int, end: int, span: int) -> Iterator[tuple[int, int]]:
@@ -42,16 +44,37 @@ class Indexer:
                 owner=e.args.owner,
                 agent_uri=e.args.agentURI,
                 block=e.blockNumber,
-                tx_hash=e.transactionHash.hex(),
+                tx_hash=Web3.to_hex(e.transactionHash),
             )
             for e in self._logs(self.identity.events.Registered, start, end)
         ]
 
-    def feedback(self, start: int, end: int) -> list[Feedback]:
-        revoked = {
+    def fundings(self, start: int, end: int, batch: int = 20) -> list[Funding]:
+        """First value transfer into each address within start..end, from full block bodies."""
+        seen: set[str] = set()
+        out: list[Funding] = []
+        for lo, hi in block_ranges(start, end, batch):
+            with self.w3.batch_requests() as b:
+                for n in range(lo, hi + 1):
+                    b.add(self.w3.eth.get_block(n, full_transactions=True))
+                blocks = b.execute()
+            for blk in blocks:
+                for tx in blk.transactions:
+                    if tx.value > 0 and tx.to and tx.to not in seen:
+                        seen.add(tx.to)
+                        out.append(Funding(tx.to, tx["from"], tx.value / 10**18, blk.number, Web3.to_hex(tx.hash)))
+        return out
+
+    def revocations(self, start: int, end: int) -> set[tuple[int, str, int]]:
+        return {
             (e.args.agentId, e.args.clientAddress, e.args.feedbackIndex)
             for e in self._logs(self.reputation.events.FeedbackRevoked, start, end)
         }
+
+    def feedback(self, start: int, end: int, revoked: set[tuple[int, str, int]] | None = None) -> list[Feedback]:
+        """NewFeedback events in start..end, marked revoked if in `revoked` (default: revocations in the same range)."""
+        if revoked is None:
+            revoked = self.revocations(start, end)
         return [
             Feedback(
                 agent_id=e.args.agentId,
@@ -61,7 +84,7 @@ class Indexer:
                 tag1=e.args.tag1,
                 tag2=e.args.tag2,
                 block=e.blockNumber,
-                tx_hash=e.transactionHash.hex(),
+                tx_hash=Web3.to_hex(e.transactionHash),
                 revoked=(e.args.agentId, e.args.clientAddress, e.args.feedbackIndex) in revoked,
             )
             for e in self._logs(self.reputation.events.NewFeedback, start, end)
