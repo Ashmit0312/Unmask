@@ -28,6 +28,8 @@ MONAD_TESTNET = Network(
     rpc_url=os.getenv("MONAD_RPC_URL", "https://testnet-rpc.monad.xyz"),
     identity_registry="0x8004A818BFB912233c491871b3d84c89A494BD9e",
     reputation_registry="0x8004B663056A597Dffe9eCcC1965A193B7388713",
+    # Public RPC: 100. QuickNode Build: 1000. Set MONAD_LOG_SPAN to match whatever MONAD_RPC_URL points at.
+    max_log_span=int(os.getenv("MONAD_LOG_SPAN", "100")),
 )
 
 MONAD_MAINNET = Network(

@@ -10,11 +10,15 @@ contract DeployOracle is Script {
     address constant IDENTITY_TESTNET = 0x8004A818BFB912233c491871b3d84c89A494BD9e;
 
     function run() external returns (AgentTrustOracle oracle) {
+        address updater = vm.envOr("ORACLE_UPDATER", address(0));
         vm.startBroadcast();
-        address updater = vm.envOr("ORACLE_UPDATER", msg.sender);
+        // The broadcasting account (--account / --private-key), not the script contract's msg.sender.
+        (, address deployer,) = vm.readCallers();
+        if (updater == address(0)) updater = deployer;
         oracle = new AgentTrustOracle(IDENTITY_TESTNET, updater);
         vm.stopBroadcast();
         console.log("AgentTrustOracle:", address(oracle));
+        console.log("owner:", deployer);
         console.log("updater:", updater);
     }
 }

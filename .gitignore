@@ -23,3 +23,9 @@ web/dist/
 # data and model artifacts (regenerable)
 data/
 *.parquet
+
+# foundry broadcast locks
+*.recovery.lock
+
+# trained models (regenerate: python -m trustscore.linker)
+offchain/trustscore/artifacts/
