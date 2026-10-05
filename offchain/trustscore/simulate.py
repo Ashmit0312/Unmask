@@ -45,6 +45,7 @@ class SimConfig:
     p_hub_funding: float = 0.0  # chance a puppet is funded from an exchange rather than its treasury
     funding_hops: int = 1  # treasury -> (hops-1) layers of intermediate wallets -> puppet
     burst_blocks: int = 2_000  # puppets rate their own agents within this window after funding
+    puppet_rating: tuple[float, float] = (90, 100)  # range puppets give their operator's agents
 
 
 @dataclass
@@ -225,7 +226,7 @@ class _Builder:
             for p, funded in puppets:
                 for aid in agents:
                     if rng.random() < cfg.p_puppet_rates_own:
-                        self.rate(aid, p, rng.uniform(90, 100), funded + int(rng.integers(1, cfg.burst_blocks)))
+                        self.rate(aid, p, rng.uniform(*cfg.puppet_rating), funded + int(rng.integers(1, cfg.burst_blocks)))
                 if rng.random() < cfg.p_camouflage:
                     for aid in rng.choice(honest_agents, size=rng.integers(1, 4), replace=False):
                         self.rate(int(aid), p, self.honest_value(int(aid)), int(rng.integers(funded + 1, self.end_block)))

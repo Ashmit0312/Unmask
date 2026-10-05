@@ -18,6 +18,8 @@ from itertools import combinations
 import numpy as np
 import pandas as pd
 
+from .features import pair_features
+
 
 @dataclass(frozen=True)
 class ModelConfig:
@@ -88,15 +90,30 @@ def corate_pairs(fb: pd.DataFrame, cfg: ModelConfig) -> dict[tuple[str, str], se
     return pairs
 
 
-def cluster_wallets(fb: pd.DataFrame, fund: pd.DataFrame, regs: pd.DataFrame, cfg: ModelConfig) -> dict[str, str]:
+def cluster_wallets(
+    fb: pd.DataFrame, fund: pd.DataFrame, regs: pd.DataFrame, cfg: ModelConfig, linker=None,
+    known_hubs: frozenset[str] = frozenset(),
+) -> dict[str, str]:
+    """Union-find over operator evidence. Non-hub funding always links. Rater-rater links come from the
+    hand-written co-rating rules (v1), or from a learned pairwise linker when one is given (v2)."""
     uf = _UnionFind()
     for w in pd.concat([fb.client, regs.owner, fund.wallet, fund.funder]).unique():
         uf.find(w)
 
-    hubs = detect_hubs(fund, cfg)
+    # Fundings found on another chain (Nansen first funder) carry block -1: identity evidence, but no timing.
+    hubs = detect_hubs(fund[fund.block >= 0], cfg) | set(known_hubs)
+    # A wallet that owns an agent is an identity, never shared infrastructure, however many wallets it funds:
+    # on Monad mainnet one agent owner funded 7,665 wallets that each rated its agent.
+    hubs -= set(regs.owner)
     for f in fund.itertuples():
         if f.funder not in hubs:
             uf.union(f.wallet, f.funder)
+
+    if linker is not None:
+        feats = pair_features(fb, fund, hubs)
+        for a, b in feats.index[(linker.predict(feats) >= linker.threshold).to_numpy()]:
+            uf.union(a, b)
+        return {w: uf.find(w) for w in uf.parent}
 
     hub_funding = {f.wallet: (f.funder, f.block) for f in fund.itertuples() if f.funder in hubs}
     for (a, b), agents in corate_pairs(fb, cfg).items():
@@ -111,14 +128,21 @@ def cluster_wallets(fb: pd.DataFrame, fund: pd.DataFrame, regs: pd.DataFrame, cf
 
 
 def score(
-    registrations: pd.DataFrame, feedback: pd.DataFrame, fundings: pd.DataFrame, cfg: ModelConfig = ModelConfig()
+    registrations: pd.DataFrame,
+    feedback: pd.DataFrame,
+    fundings: pd.DataFrame,
+    cfg: ModelConfig = ModelConfig(),
+    linker=None,
+    known_hubs: frozenset[str] = frozenset(),
 ) -> ScoreResult:
+    """known_hubs: funders confirmed as exchanges or other shared infrastructure from outside the ratings data
+    (Nansen labels, lifetime transfer counts); they never link the wallets they fund."""
     if cfg.block_scale != 1.0:
         registrations, feedback, fundings = (
             f.assign(block=f.block * cfg.block_scale) for f in (registrations, feedback, fundings)
         )
-    fb = feedback[~feedback.revoked] if "revoked" in feedback else feedback
-    cluster = cluster_wallets(fb, fundings, registrations, cfg)
+    fb = feedback[~feedback.revoked.astype(bool)] if "revoked" in feedback else feedback
+    cluster = cluster_wallets(fb, fundings, registrations, cfg, linker, known_hubs)
 
     fb = fb.assign(cluster=fb.client.map(cluster))
     owner_cluster = registrations.set_index("agent_id").owner.map(cluster)
