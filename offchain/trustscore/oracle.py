@@ -6,6 +6,9 @@ Local fork (anvil dev account 1 is the updater the local deploy used):
 Live demo: add --watch 5 to re-index, re-score and post every 5 seconds.
 
 Testnet reads ORACLE_PRIVATE_KEY and TRUST_ORACLE_ADDRESS from .env when --key / --oracle are omitted.
+
+Real agents on Monad testnet, full history from Envio HyperSync (only agents with ratings are posted):
+    python -m trustscore.oracle --source hypersync --watch 30
 """
 
 import argparse
@@ -75,7 +78,8 @@ def to_onchain(res: model.ScoreResult, regs: pd.DataFrame) -> pd.DataFrame:
     a = res.agents.merge(regs[["agent_id", "owner"]], on="agent_id")
     w = res.wallets.set_index("wallet")
     owner_cluster = a.owner.map(w.cluster)
-    flagged = a.owner.map(w.suspicion).fillna(0) >= RING_FLAG
+    # Flag the operator when its wallets act as a ring, or when the agent's ratings come mostly from its own operator.
+    flagged = (a.owner.map(w.suspicion).fillna(0) >= RING_FLAG) | (a.self_dealing_share >= RING_FLAG)
     return pd.DataFrame({
         "agent_id": a.agent_id.astype(int),
         "score_bps": np.clip(np.rint(a.score * 100), 0, 10_000).astype(int),
@@ -148,8 +152,37 @@ def score_and_post(data: ChainData, poster: Poster, cfg: model.ModelConfig):
     return rows, todo, hashes
 
 
+def run_hypersync(args, poster: Poster) -> None:
+    """Score every rated agent on the chain from HyperSync data and keep the oracle in sync."""
+    from . import realdata
+
+    net_name = {10143: "monad-testnet", 143: "monad"}[poster.w3.eth.chain_id]
+    cfg = model.ModelConfig()
+    print(f"oracle {poster.oracle.address} on {net_name}, updater {poster.acct.address}, "
+          f"model {Web3.to_hex(model_hash(cfg))[:18]}")
+    while True:
+        t0 = time.time()
+        inp = realdata.collect(net_name, refresh=True, quiet=True)
+        res = model.score(inp.registrations, inp.feedback, inp.fundings, cfg, known_hubs=inp.known_hubs)
+        rated = set(inp.feedback.agent_id)
+        rows = to_onchain(res, inp.registrations)
+        rows = rows[rows.agent_id.isin(rated)]  # unrated agents stay unscored: isTrusted() is false for them
+        todo = poster.changed(rows)
+        hashes = poster.post(todo, model_hash(cfg)) if len(todo) else []
+        print(f"[to block {inp.head}] {len(rated)} rated agents, {len(inp.feedback)} ratings -> posted {len(todo)} "
+              f"changed scores in {len(hashes)} tx ({time.time() - t0:.1f}s), epoch {poster.oracle.functions.epoch().call()}")
+        if args.out:
+            args.out.parent.mkdir(parents=True, exist_ok=True)
+            rows.to_csv(args.out, index=False)
+        if not args.watch:
+            break
+        time.sleep(args.watch)
+
+
 def main() -> None:
     p = argparse.ArgumentParser()
+    p.add_argument("--source", choices=["rpc", "hypersync"], default="rpc",
+                   help="rpc: index a block range (replays); hypersync: full history of real agents")
     p.add_argument("--rpc-url", default=MONAD_TESTNET.rpc_url)
     p.add_argument("--oracle", default=os.getenv("TRUST_ORACLE_ADDRESS"))
     p.add_argument("--key", default=os.getenv("ORACLE_PRIVATE_KEY"))
@@ -160,6 +193,9 @@ def main() -> None:
     args = p.parse_args()
     if not (args.oracle and args.key):
         p.error("--oracle and --key (or TRUST_ORACLE_ADDRESS / ORACLE_PRIVATE_KEY in .env) are required")
+
+    if args.source == "hypersync":
+        return run_hypersync(args, Poster(Web3(Web3.HTTPProvider(args.rpc_url)), args.oracle, args.key))
 
     manifest = json.loads((args.labels / "manifest.json").read_text()) if args.labels else {}
     start = args.from_block if args.from_block is not None else manifest.get("from_block")
