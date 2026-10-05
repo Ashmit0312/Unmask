@@ -1,0 +1,277 @@
+[
+  {
+    "type": "constructor",
+    "inputs": [
+      {
+        "name": "identityRegistry_",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "MAX_VALUE",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint8",
+        "internalType": "uint8"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "challengeFor",
+    "inputs": [
+      {
+        "name": "agentId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "value",
+        "type": "uint8",
+        "internalType": "uint8"
+      },
+      {
+        "name": "tag",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "x",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "y",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes",
+        "internalType": "bytes"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getReview",
+    "inputs": [
+      {
+        "name": "reviewer",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "agentId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "tuple",
+        "internalType": "struct PasskeyReviews.Review",
+        "components": [
+          {
+            "name": "value",
+            "type": "uint8",
+            "internalType": "uint8"
+          },
+          {
+            "name": "tag",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "version",
+            "type": "uint32",
+            "internalType": "uint32"
+          },
+          {
+            "name": "updatedAt",
+            "type": "uint64",
+            "internalType": "uint64"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "identityRegistry",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract IIdentityRegistry"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "reviewerId",
+    "inputs": [
+      {
+        "name": "x",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "y",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "pure"
+  },
+  {
+    "type": "function",
+    "name": "submit",
+    "inputs": [
+      {
+        "name": "agentId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "value",
+        "type": "uint8",
+        "internalType": "uint8"
+      },
+      {
+        "name": "tag",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "x",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "y",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "auth",
+        "type": "tuple",
+        "internalType": "struct WebAuthn.WebAuthnAuth",
+        "components": [
+          {
+            "name": "authenticatorData",
+            "type": "bytes",
+            "internalType": "bytes"
+          },
+          {
+            "name": "clientDataJSON",
+            "type": "string",
+            "internalType": "string"
+          },
+          {
+            "name": "challengeIndex",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "typeIndex",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "r",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "s",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          }
+        ]
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "event",
+    "name": "PasskeyReview",
+    "inputs": [
+      {
+        "name": "agentId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "reviewer",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "value",
+        "type": "uint8",
+        "indexed": false,
+        "internalType": "uint8"
+      },
+      {
+        "name": "tag",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "version",
+        "type": "uint32",
+        "indexed": false,
+        "internalType": "uint32"
+      },
+      {
+        "name": "x",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "y",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "bytes32"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "error",
+    "name": "InvalidPasskeySignature",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ValueOutOfRange",
+    "inputs": []
+  }
+]

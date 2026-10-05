@@ -16,6 +16,7 @@ budget limit or an outage stopped them.
 
 import argparse
 import json
+import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -134,6 +135,10 @@ def collect(net_name: str, nansen_budget: int = 0, labels_top: int = 0, out: Pat
 
     # 1. events
     regs, fb, head = update_events(src, out, refresh)
+    if (passkey := os.environ.get("PASSKEY_REVIEWS_ADDRESS")) and net.chain_id == 10143:
+        pk = pd.DataFrame(map(asdict, src.passkey_reviews(passkey)), columns=FEEDBACK_COLS)
+        log(f"    + {len(pk)} passkey reviews from {pk.client.nunique()} passkeys")
+        fb = pd.concat([fb, pk], ignore_index=True)
     fb = fb.astype({"revoked": bool, "agent_id": int, "value": float, "block": int})
     regs = regs.astype({"agent_id": int, "block": int})
     raters = set(fb.client)

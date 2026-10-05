@@ -29,6 +29,8 @@ SIG_FEEDBACK = (
     "bytes32 feedbackHash)"
 )
 SIG_REVOKED = "FeedbackRevoked(uint256 indexed agentId, address indexed clientAddress, uint64 indexed feedbackIndex)"
+SIG_PASSKEY = ("PasskeyReview(uint256 indexed agentId, bytes32 indexed reviewer, uint8 value, bytes32 tag, uint32 version, "
+               "bytes32 x, bytes32 y)")
 
 LOG_FIELDS = [f.value for f in (h.LogField.BLOCK_NUMBER, h.LogField.TRANSACTION_HASH, h.LogField.LOG_INDEX,
                                 h.LogField.ADDRESS, h.LogField.TOPIC0, h.LogField.TOPIC1, h.LogField.TOPIC2,
@@ -49,7 +51,7 @@ class HyperSyncSource:
         if not token:
             raise RuntimeError("ENVIO_API_TOKEN is not set (https://app.envio.dev/api-tokens)")
         self.client = h.HypersyncClient(h.ClientConfig(url=HYPERSYNC_URLS[net.chain_id], bearer_token=token))
-        self._decoders = {sig: h.Decoder([sig]) for sig in (SIG_REGISTERED, SIG_FEEDBACK, SIG_REVOKED)}
+        self._decoders = {sig: h.Decoder([sig]) for sig in (SIG_REGISTERED, SIG_FEEDBACK, SIG_REVOKED, SIG_PASSKEY)}
 
     # paging
 
@@ -94,6 +96,20 @@ class HyperSyncSource:
             out.append(Feedback(agent, client, int(index), int(value) / 10 ** int(decimals), tag1, tag2,
                                 log.block_number, log.transaction_hash, (agent, client, int(index)) in revoked))
         return out
+
+    def passkey_reviews(self, contract: str, start: int = 0, end: int | None = None) -> list[Feedback]:
+        """Latest review per (passkey, agent) from a PasskeyReviews contract, as Feedback rows. The reviewer's
+        pseudonymous address is the low 20 bytes of its passkey id; tag2 is "passkey"; index is the revision."""
+        rows = asyncio.run(self._events(contract, SIG_PASSKEY, start, end))
+        latest: dict[tuple[int, str], Feedback] = {}
+        for log, d in rows:
+            agent, reviewer = int(d.indexed[0].val), d.indexed[1].val
+            value, tag, version = int(d.body[0].val), d.body[1].val, int(d.body[2].val)
+            tag = bytes.fromhex(tag[2:]).rstrip(b"\x00").decode(errors="replace") if isinstance(tag, str) else ""
+            client = _addr("0x" + reviewer[-40:])
+            latest[(agent, client)] = Feedback(agent, client, version, float(value), tag, "passkey",
+                                               log.block_number, log.transaction_hash)
+        return list(latest.values())
 
     # wallet funding
 
