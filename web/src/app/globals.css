@@ -1,0 +1,61 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #f7f7f5;
+  --fg: #16161a;
+  --panel: #ffffff;
+  --line: #e2e2dc;
+  --muted: #6b6b73;
+  --accent: #6e54ff;
+  --good: #1f9d55;
+  --bad: #d64545;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0c0c10;
+    --fg: #ececf1;
+    --panel: #15151c;
+    --line: #2a2a35;
+    --muted: #9a9aa8;
+    --accent: #8b76ff;
+    --good: #3ccf7a;
+    --bad: #ff6b6b;
+  }
+}
+
+@theme inline {
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+}
+
+@layer components {
+  .btn,
+  .btn-primary,
+  .btn-ghost {
+    @apply rounded-lg px-4 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    background: var(--accent);
+    color: #fff;
+  }
+  .btn-primary:hover:not(:disabled) {
+    filter: brightness(1.1);
+  }
+  .btn {
+    border: 1px solid var(--line);
+    background: var(--panel);
+  }
+  .btn-ghost {
+    color: var(--muted);
+  }
+  .btn-ghost:hover {
+    color: var(--fg);
+  }
+}
